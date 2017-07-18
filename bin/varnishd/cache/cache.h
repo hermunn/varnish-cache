@@ -413,7 +413,7 @@ struct objcore {
 	float			grace;
 	float			keep;
 
-	uint8_t			flags;
+	uint16_t		flags;
 
 	uint8_t			exp_flags;
 
