@@ -696,6 +696,7 @@ extern pthread_t cli_thread;
 void EXP_Clr(struct exp *e);
 
 double EXP_Ttl(const struct req *, const struct exp*);
+double EXP_Ttl_plus_grace(const struct req *req, const struct exp *e);
 double EXP_When(const struct exp *exp);
 void EXP_Insert(struct worker *wrk, struct objcore *oc);
 void EXP_Inject(struct worker *wrk, struct objcore *oc, struct lru *lru);
@@ -1088,7 +1089,7 @@ pdiff(const void *b, const void *e)
 #define Tcheck(t) do {						\
 		AN((t).b);					\
 		AN((t).e);					\
-		assert((t).b <= (t).e); 			\
+		assert((t).b <= (t).e);				\
 	} while(0)
 
 /*

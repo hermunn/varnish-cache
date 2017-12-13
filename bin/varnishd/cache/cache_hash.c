@@ -452,22 +452,33 @@ HSH_Lookup(struct req *req, struct objcore **ocp, struct objcore **bocp,
 	if (exp_oc != NULL) {
 		assert(oh->refcnt > 1);
 		assert(exp_oc->objhead == oh);
-		exp_oc->refcnt++;
 
 		if (!busy_found) {
 			*bocp = hsh_insert_busyobj(wrk, oh);
 			retval = HSH_EXPBUSY;
 		} else {
 			AZ(req->hash_ignore_busy);
-			retval = HSH_EXP;
+			/*
+			 * here we have a busy object, but if the stale object
+			 * is not under grace we should probably go to the
+			 * waiting list instread of returning the stale object
+			 */
+			if (EXP_Ttl_plus_grace(req, &exp_oc->exp) < req->t_req)
+				retval = HSH_BUSY;
+			else
+				retval = HSH_EXP;
 		}
-		if (exp_oc->hits < LONG_MAX)
-			exp_oc->hits++;
-		Lck_Unlock(&oh->mtx);
-		if (retval == HSH_EXP)
-			assert(HSH_DerefObjHead(wrk, &oh));
-		*ocp = exp_oc;
-		return (retval);
+		if (retval != HSH_BUSY) {
+			exp_oc->refcnt++;
+
+			if (exp_oc->hits < LONG_MAX)
+				exp_oc->hits++;
+			Lck_Unlock(&oh->mtx);
+			if (retval == HSH_EXP)
+				assert(HSH_DerefObjHead(wrk, &oh));
+			*ocp = exp_oc;
+			return (retval);
+		}
 	}
 
 	if (!busy_found) {

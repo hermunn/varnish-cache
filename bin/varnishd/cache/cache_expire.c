@@ -101,7 +101,7 @@ EXP_Clr(struct exp *e)
 }
 
 /*--------------------------------------------------------------------
- * Calculate an objects effective ttl time, taking req.ttl into account
+ * Calculate an object's effective ttl time, taking req.ttl into account
  * if it is available.
  */
 
@@ -114,6 +114,17 @@ EXP_Ttl(const struct req *req, const struct exp *e)
 	if (req != NULL && req->d_ttl > 0. && req->d_ttl < r)
 		r = req->d_ttl;
 	return (e->t_origin + r);
+}
+
+/*--------------------------------------------------------------------
+ * Calculate an object's ttl+grace time, taking both req.ttl and
+ * req.grace into account when available.
+ */
+
+double
+EXP_Ttl_plus_grace(const struct req *req, const struct exp *e)
+{
+	return EXP_Ttl(req, e) + e->grace;
 }
 
 /*--------------------------------------------------------------------
