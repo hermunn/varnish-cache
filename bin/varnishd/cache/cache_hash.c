@@ -590,18 +590,19 @@ hsh_rush2(struct worker *wrk, struct rush *r)
  */
 
 unsigned
-HSH_Purge(struct worker *wrk, struct objhead *oh, double ttl, double grace,
-double keep)
+HSH_Purge(struct worker *wrk, struct objhead *oh, double now, double ttl,
+double grace, double keep)
 {
 	struct objcore *oc, **ocp;
 	unsigned spc, ospc, nobj, n, n_tot = 0;
 	int more = 0;
-	double now;
 
 	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
 	CHECK_OBJ_NOTNULL(oh, OBJHEAD_MAGIC);
 	ospc = WS_Reserve(wrk->aws, 0);
 	assert(ospc >= sizeof *ocp);
+	if (isnan(now))
+		now = VTIM_real();
 	/*
 	 * Because of "soft" purges, there might be oc's in the list that has
 	 * the OC_F_PURGED flag set. We do not want to let these slip through,
@@ -623,7 +624,6 @@ double keep)
 		ocp = (void*)wrk->aws->f;
 		Lck_Lock(&oh->mtx);
 		assert(oh->refcnt > 0);
-		now = VTIM_real();
 		VTAILQ_FOREACH(oc, &oh->objcs, hsh_list) {
 			CHECK_OBJ_NOTNULL(oc, OBJCORE_MAGIC);
 			assert(oc->objhead == oh);
