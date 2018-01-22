@@ -158,6 +158,8 @@ EXP_Rearm(struct objcore *oc, double now, double ttl, double grace, double keep)
 		oc->grace = grace;
 	if (!isnan(keep))
 		oc->keep = keep;
+	if (ttl == 0. && grace == 0. && keep == 0.)
+		oc->flags |= OC_F_DYING;
 
 	when = EXP_WHEN(oc);
 
