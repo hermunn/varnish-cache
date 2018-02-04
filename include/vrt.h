@@ -65,6 +65,7 @@
  *	VRT_l_beresp_storage_hint() removed - under discussion #2509
  *	VRT_blob() added
  *	VCL_STRANDS added
+ *	ttl_now added to struct ctx
  * 6.1 (2017-09-15 aka 5.2)
  *	http_CollectHdrSep added
  *	VRT_purge modified (may fail a transaction, signature changed)
@@ -182,6 +183,7 @@ struct vrt_ctx {
 	struct http			*http_beresp;
 
 	double				now;
+	double				ttl_now;
 
 	/*
 	 * method specific argument:

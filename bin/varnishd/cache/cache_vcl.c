@@ -1117,9 +1117,14 @@ vcl_call_method(struct worker *wrk, struct req *req, struct busyobj *bo,
 		ctx.req = req;
 		ctx.sp = req->sp;
 		ctx.now = req->t_prev;
+		ctx.ttl_now = req->t_req;
+		if (!isnan(req->t_restart))
+			ctx.ttl_now = req->t_restart;
 		ctx.ws = req->ws;
 	}
 	if (bo != NULL) {
+		if(req)
+			assert(method == VCL_MET_PIPE);
 		CHECK_OBJ_NOTNULL(bo, BUSYOBJ_MAGIC);
 		CHECK_OBJ_NOTNULL(bo->vcl, VCL_MAGIC);
 		vsl = bo->vsl;
@@ -1129,8 +1134,11 @@ vcl_call_method(struct worker *wrk, struct req *req, struct busyobj *bo,
 		ctx.bo = bo;
 		ctx.sp = bo->sp;
 		ctx.now = bo->t_prev;
+		ctx.ttl_now = bo->t_prev;
 		ctx.ws = bo->ws;
 	}
+	if (method == VCL_MET_DELIVER)
+		ctx.ttl_now = ctx.now;
 	assert(ctx.now != 0);
 	ctx.vsl = vsl;
 	ctx.specific = specific;

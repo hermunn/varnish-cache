@@ -167,6 +167,7 @@ ved_include(struct req *preq, const char *src, const char *host,
 
 	req->req_step = R_STP_RECV;
 	req->t_req = preq->t_req;
+	req->t_restart = preq->t_restart;
 	assert(isnan(req->t_first));
 	assert(isnan(req->t_prev));
 

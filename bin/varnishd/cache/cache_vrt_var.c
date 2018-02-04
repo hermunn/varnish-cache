@@ -516,7 +516,7 @@ VRT_r_bereq_retries(VRT_CTX)
  *	ttl is relative to t_origin
  *	grace&keep are relative to ttl
  * In VCL:
- *	ttl is relative to now
+ *	ttl is relative to ttl_now (in struct vrt_ctx)
  *	grace&keep are relative to ttl
  */
 
@@ -551,14 +551,14 @@ VRT_r_##which##_##fld(VRT_CTX)					\
 }
 
 VRT_DO_EXP_R(obj, ctx->req->objcore, ttl,
-    ctx->now - ctx->req->objcore->t_origin)
+    ctx->ttl_now - ctx->req->objcore->t_origin)
 VRT_DO_EXP_R(obj, ctx->req->objcore, grace, 0)
 VRT_DO_EXP_R(obj, ctx->req->objcore, keep, 0)
 
 VRT_DO_EXP_L(beresp, ctx->bo->fetch_objcore, ttl,
-    ctx->now - ctx->bo->fetch_objcore->t_origin)
+    ctx->ttl_now - ctx->bo->fetch_objcore->t_origin)
 VRT_DO_EXP_R(beresp, ctx->bo->fetch_objcore, ttl,
-    ctx->now - ctx->bo->fetch_objcore->t_origin)
+    ctx->ttl_now - ctx->bo->fetch_objcore->t_origin)
 VRT_DO_EXP_L(beresp, ctx->bo->fetch_objcore, grace, 0)
 VRT_DO_EXP_R(beresp, ctx->bo->fetch_objcore, grace, 0)
 VRT_DO_EXP_L(beresp, ctx->bo->fetch_objcore, keep, 0)
@@ -574,7 +574,7 @@ VRT_r_##which##_##age(VRT_CTX)					\
 {								\
 								\
 	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);			\
-	return (ctx->now - oc->t_origin);			\
+	return (ctx->ttl_now - oc->t_origin);			\
 }
 
 VRT_DO_AGE_R(obj, ctx->req->objcore)

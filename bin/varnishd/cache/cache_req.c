@@ -141,6 +141,7 @@ Req_New(const struct worker *wrk, struct sess *sp)
 	req->t_first = NAN;
 	req->t_prev = NAN;
 	req->t_req = NAN;
+	req->t_restart = NAN;
 
 	VRTPRIV_init(req->privs);
 
@@ -219,6 +220,7 @@ Req_Cleanup(struct sess *sp, struct worker *wrk, struct req *req)
 	req->t_first = NAN;
 	req->t_prev = NAN;
 	req->t_req = NAN;
+	req->t_restart = NAN;
 	req->req_body_status = REQ_BODY_INIT;
 
 	req->hash_always_miss = 0;
