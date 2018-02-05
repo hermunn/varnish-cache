@@ -1118,8 +1118,6 @@ vcl_call_method(struct worker *wrk, struct req *req, struct busyobj *bo,
 		ctx.sp = req->sp;
 		ctx.now = req->t_prev;
 		ctx.ttl_now = req->t_req;
-		if (!isnan(req->t_restart))
-			ctx.ttl_now = req->t_restart;
 		ctx.ws = req->ws;
 	}
 	if (bo != NULL) {

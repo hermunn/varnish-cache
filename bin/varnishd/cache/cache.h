@@ -510,7 +510,6 @@ struct req {
 	double			t_first;	/* First timestamp logged */
 	double			t_prev;		/* Previous timestamp logged */
 	double			t_req;		/* Headers complete */
-	double			t_restart;	/* Time of last restart */
 
 	struct http_conn	htc[1];
 	struct vfp_ctx		*vfc;
