@@ -134,7 +134,7 @@ valid invocations from vcl::
 	debug.argtest("1", four=6);
 
 The C interface does not change with named arguments and default
-values, arguments remain positional and defaul values appear no
+values, arguments remain positional and default values appear no
 different to user specified values.
 
 `Note` that default values have to be given in the native C-type
@@ -472,6 +472,259 @@ to the user if they try to warm up a cooling VCL::
 In the case where properly releasing resources may take some time, you can
 opt for an asynchronous worker, either by spawning a thread and tracking it, or
 by using Varnish's worker pools.
+
+Cache behavior VMODs
+====================
+
+VMODs can also modify the behavior of Varnish that is not strictly
+within a single VCL call. For example, a VMOD can provide an alternate
+algorithm for selecting object from the cache during lookup (that is
+between `vcl_hash` and `vcl_hit` / `vcl_miss`).
+
+Cache lookup, insertion and removal
+-----------------------------------
+
+In the core of Varnish Cache is the actual cache. Objects are
+inserted into the cache after `vcl_backend_response` (actually, a busy
+object is inserted during lookup, and is turned into a "real" object
+after vcl_backend_response), retrieved from the cache during lookup
+(after `vcl_hash`) and deleted from the cache either to make room for
+new objects, or when the expiry thread finds objects that has run
+completely stale (ttl + grace + keep has expired). Cache insertion are
+affected by VCL in `vcl_backend_response`, and cache lookup relies on
+`vcl_recv` and `vcl_hash`.
+
+The ability to affect cache insertion and lookup can be extended by
+VMODs, and this enables you to use new caching strategies.
+
+The standard VMOD provides a simple example on how this can be done. /
+The VMOD *newsflash*, bundled with Varnish Cache, provides caching
+behavior modifications that is useful for news organizations. It
+demonstrates how a hashing behavior VMOD can be written and can be
+used as a template for new similar VMODs.
+
+Selecting alternate behavior on lookup
+--------------------------------------
+
+During `vcl_recv` (or `vcl_hash`), a call to a VMOD can change each
+object's fitness for serving to a client, and thus how Varnish will
+react during lookup.
+
+For example, consider the following VCL code::
+
+	sub vcl_recv {
+		if (my_backend.is_healthy()) {
+			// either
+			newsflash.set_max_grace(10s);
+			// or (more Varnish-like?)
+			set_lookup_behavior(newsflash.max_grace(10s));
+		}
+	}
+
+The result is that, when all the objects for the given hash is
+considered, grace is capped at 10 seconds. Apart from that, everything
+is as before. Note that if the backend is sick, then the VCL will not
+install a custom behavior during lookup, and the object's grace values
+are respected.
+
+Behind the scenes, the VMOD will install a set of callbacks that will
+be used during cache lookup.
+
+* A callback that will be called once per *candidate object* in the
+  cache. A candidate object is an object from the same hash, that
+  matches Vary headers. In other words, the *candidate objects* are
+  exactly the ones that are considered by the unmodified lookup
+  behavior, after filtering for Vary. This callback will get a
+  PRIV_TASK object in addition to the reference to the candidate
+  object.
+* Possibly special callbacks for *busy object*, *hit-for-miss*,
+  *hit-for-pass* or similar.
+* A *candidate fini* function where the VMOD is asked: "These are all
+  the objects, what should we do now?". There are several
+  possibilities; HIT, MISS, WAIT, PASS. For HIT and WAIT, the VMOD can
+  choose if it wants to initiate a new fetch. (Note: If the VMOD
+  returns WAIT but still initiates a fetch, this will be a background
+  fetch, and there will be no guarantee that the resulting object will
+  be served to the request when the fetch finishes, and this contrasts
+  normal Varnish behavior. The VMOD itself then needs to make sure it
+  does not go into an infinite loop, where it keeps going inserting
+  objects and going back to the waiting list. Always going to the
+  waiting list is a good idea if you want *long polling*. Then you
+  will use one thread (the fetch thread) to wait for data on the
+  socket, and the client thread gets to disembark instead of waiting
+  for the backend thread to fetch the object.)
+
+Note that, after lookup has finished, and control is handed over to
+`vcl_hit` or `vcl_miss`, the VMOD still holds it PRIV_TASK data. This
+means that one can get further information on the result of the
+lookup. For example, the VMOD can remember how many object were
+considered, and return this information in `vcl_deliver`. However, in
+these cases the VMOD must not use the object pointer it got in a
+callback (since it has let the *oh lock* go).
+
+Affecting caching through special objects
+-----------------------------------------
+
+In `vcl_backend_response`, a VMOD can be ask to insert a special
+object that is similar to *hit-for-miss* and *hit-for-pass* objects
+(actually these objects are old objects that have a flag set, and
+where the body is thrown away after delivery, so something slightly
+different is needed here), and that will only be used to inform the
+VMOD itself about future caching behavior. For example, if a backend
+signals that it cannot produce a new version of an object, and that
+stale objects should be used for a while, then such an object can be
+inserted. This enables *stale-if-error* behavior with a timeout
+similar to the existing *hit-for-miss* and *hit-for-pass*
+mechanisms. The *newsflash* VMOD provides this functionality through
+the function ??? that can be called in
+`vcl_backend_response`. (Previous hacks to get *stale-if-error*
+behavior has involved a restart, and have not been able to clear out
+the waiting list in a satisfactory way.)
+
+Up for discussion: An important point with these objects is that only
+the VMOD itself will see them, so that caching behavior will not
+change if the VCL is switched, and subsequent requests are handled
+without use of a caching behavior VMOD.
+
+Writing a caching behavior VMOD
+-------------------------------
+
+Typically, you should not write a caching behavior VMOD unless you are
+intimately familiar with the core of Varnish. If you do, read through
+the code of the included `newsflash` VMOD before you start to implement your
+own.
+
+However, even if you are not a core Varnish Developer, writing a
+caching behavior VMOD should not be completely impossible. Here are
+the steps you need to do. From now on we assume that your vmod is
+called ``my_vmod``.
+
+Implement an initialization function
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The initialization function function will be called from
+`vcl_recv`. Its role is to initialize the PRIV_TASK structure and
+install callback functions. It should have the following form::
+
+	VCL_INT my_foo (parameters)
+	{
+		// 1. Check if we are in vcl_recv
+		// 2. Allocate and initialize the priv object from the parameters
+		// 3. Install callback functions
+	}
+
+Create the callback functions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The callback functions are called under the *OH lock*, where Varnish
+loops over all the candidate objects. This means that there are other
+rules about what the VMOD can do should not do. These are the most
+important changes:
+
+* You must not allocate bytes on the workspace. Instead you should
+  allocate the amount you need during the initialization function, and
+  use `malloc` if you need more space. Try to avoid `malloc` if you
+  can.
+
+* You should not make any calls that will try to grab the OH lock for
+  the current transaction, because this will cause a race condition.
+
+* You should not do any significant calculations or potentially
+  expensive system calls. This includes everything that might use the
+  network.
+
+* You can store pointers to objects (i.e. `struct objcore *`) that are
+  handed to you in the callbacks, but you should not grab any
+  references to the objects. These pointers will be valid until you
+  return from your fini function (see below)
+
+For each normal candidate object, the same vmod function, registered in
+vcl_recv, will be called. Implement this function::
+
+	int my_obj_candidate_cb(struct worker *wrk, void *priv, struct objcore *oc)
+
+It should inspect the object (represented by `*oc`) and maybe store it
+in the priv structure. The idea is to remember the best candidate for
+later. Be very restrictive about inspecting the object (by working on
+its headers, for example), since the callback functions may be called
+many times per transaction.
+
+For each special object (hit-for-miss, hit-for-pass or the VMODs own
+similar object), a different function will be called. In other words,
+you should implement::
+
+	int my_obj_meta_cb(struct worker *wrk, void *priv, struct objcore *oc,
+	    enum metatype m)
+
+The last parameter is of type ???, which is defined in ???. The role
+of this function is to either abruptly stop processing or to change
+the reply of the fini function.
+
+If either of `my_obj_candidate_cb` or `my_obj_meta_cb` returns
+non-zero (true), then Varnish will skip the rest of the candidate
+objects, and go straight to the fini function.
+
+Finally, implement the fini function::
+
+	enum vmod_lookup_fini_e my_lookup_fini_cb(struct worker *wrk,
+	    void *priv,	struct objcore **ocp, int *insert_boc)
+
+This will determine the result of the lookup. The possible return values are
+
+* `lookup_fini_miss`: Go straight to `sub vcl_miss`. If an `oc` is
+  inserted into `ocp`, this will be used as a 304 candidate.
+* `lookup_fini_hit`: Go straight to `sub vcl_hit` and carry out the
+  logic there. In this case it is important to notice that the
+  built-in VCL can `return (miss)` when you actually want to deliver
+  the object. Varnish will panic if `ocp` is not set to a valid object.
+* `lookup_fini_pass`: Go straight to `sub vcl_pass` and carry out the
+  logic there.
+* `lookup_fini_deliver`: Bypass `vcl_hit` and `vcl_miss` entirely and
+  deliver the object. Varnish will panic if `ocp` is not set to a
+  valid object.
+* `lookup_fini_wait`: Go back to the waiting list, and wait for fetch
+  to finish. This will assert if there is no busy object and
+  `insert_boc` is not set to a non-zero value.
+
+The *out* parameter `insert_boc` is used to indicate if Varnish should
+initiate a fetch. It has to be nonzero for `lookup_fini_miss` and can
+be either for the other values. Upon entry, it will be `1` if and only
+if there no busy object was shown to the VMOD through a call to
+`my_obj_candidate_cb`. Note that zero in `*insert_boc` upon entry does
+not mean that there are no busy object in the list since the callbacks
+have the ability to stop processing by returning 1 in a callback.
+
+The pointer `ocp` is initialized to NULL unless a callback return a
+nonzero value, in which `ocp` will point to the corresponding object.
+
+Upon return, if the fini function returns `lookup_fini_hit` and the
+corresponding object is either *hit-for-pass* or *hit-for-miss*, then
+the corresponding action will happen (pass or miss) instead of
+hit. This means that::
+
+	if (boc) {
+		return (lookup_fini_hit);
+	}
+
+will be valid for most cases (when the `my_obj_meta_cb` function
+always returns 0 for meta objects that are not *hit-for-pass* or
+*hit-for-miss*).
+
+Create the functions to add meta objects
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In `vcl_backend_response` it can be useful to insert extra meta
+objects that will inform client side tasks about changes in how the
+objects should be served. The classical example is a meta object that
+extends the grace time of stored objects for a while. This is
+exemplified in the `newsflash` vmod.
+
+Create other functions that can be useful on the client side
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The PRIV structure can contain arbitrary information that is kept
+during the processing of the request. A VMOD can expose this
+information through normal VMOD functions.
 
 When to lock, and when not to lock
 ==================================
