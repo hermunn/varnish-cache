@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -160,11 +161,16 @@ mgt_vcl_setstate(struct cli *cli, struct vclprog *vp, const char *vs)
 
 	i = mgt_cli_askchild(&status, &p, "vcl.state %s %d%s\n",
 	    vp->name, warm, vp->state);
-	if (i) {
-		AN(cli);
+	if (i && cli != NULL) {
 		AN(warm);
 		VCLI_SetResult(cli, status);
 		VCLI_Out(cli, "%s", p);
+	} else if (i) {
+		if(mgt_param.syslog_cli_traffic)
+			syslog(LOG_ERR, "%s problems; i=%d; "
+			       "status=%d; vcl.state %s %d%s",
+			       __func__, i, status, vp->name, warm,
+			       vp->state);
 	} else {
 		/* Success, update mgt's VCL state to reflect child's
 		   state */
